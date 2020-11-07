@@ -2,25 +2,30 @@
 #' \code{extractCatchmentData} extracts catchment average climate data from netCDF files containing Australian climate data.
 #'
 #' @description
-#' extractCatchmentData extracts the AWAP climate data for each point or polygon, and for the latter the daily spatial mean and variance (or user defined function) of
-#' each climate metric is calculated.
+#' extractCatchmentData extracts the AWAP climate data for each point or polygon. For the latter, either the daily spatial mean and variance (or user defined function) of
+#' each climate metric is calculated or the spatial data is returned.
 #'
 #' @details
-#' The calculation of the spatial mean uses the fraction of each AWAP grid cell within the polygon.
+#' Daily data is extracted and can be aggregated to a weekly, monthly, quarterly, annual or a user-defined timestep using a user-defined funcion
+#' (e.g. sum, mean, min, max as defined by \code{temporal.function.name}). The temporally aggreated data at each grid cell is then used to derive the spatial
+#' mean or the spatial variance (or any other function as defined by \code{spatial.function.name}).
+#'
+#' The calculation of the spatial mean uses the fraction of each AWAP grid cell within the catchment polygon.
 #' The variance calculation (or user defined function) does not use the fraction of the grid cell and returns NA if there are <2 grid cells in the catchment boundary.
-#' Prior to the catchment averaging and variance, evapotranspiration (ET) can also calculated; after which the mean and
-#' variance PET is calculated.
+#' Prior to the spatial aggregation, evapotranspiration (ET) can also calculated; after which, say, the mean and
+#' variance PET can be calculated.
 #'
 #' The data extraction will by default be undertaken from 1/1/1900 to yesterday, even if the netCDF grids were only
 #' built for a subset of this time period. If the latter situation applies, it is recommended that the extraction start
 #' and end dates are input by the user.
 #'
-#' The ET can be calculated using one of eight methods at a user defined time-step. When the time-step is monthly or annual then
+#' The ET can be calculated using one of eight methods at a user defined calculation time-step; that is the \code{ET.timestep} defines the
+#' time step at which the estimates are serived and differs from the output timestep as defined by \code{temporal.function.name}). When \code{ET.timestep} is monthly or annual then
 #' the ET estimate is linearly interpolated to a daily time step (using zoo:na.spline()) and then constrained to >=0. In calculating ET, the input data
 #' is pre-processed using Evapotranspiration::ReadInputs() such that missing days, missing enteries and abnormal values are interpolated
 #' (by default) with the former two interpolated using the "DoY average", i.e. replacement with same day-of-the-year average. Additionally, when AWAP solar
 #' radiation is required for the ET function, data is only available from 1/1/1990. To derive ET values <1990, the average solar radiation for each day of the year from
-#' 1/1/990 to "extractTo" is derived (i.e. 365 values) and then applied to each day prior to 1990. Importantly, the estimates of ET <1990
+#' 1/1/990 to "extractTo" is derived (i.e. 365 values) and then applied to each day prior to 1990. Importantly, in this situation the estimates of ET <1990
 #' are dependent upon the end date extracted. Re-running the estimation of ET with a later extractTo data will change the estimates of ET
 #' prior to 1990.
 #'
@@ -43,8 +48,15 @@
 #' @param DEM is either the full file name to a ESRI ASCII grid (as lat/long and using GDA94) or a raster class grid object. The DEM is used
 #' for the calculation of Morton's PET. The Australian 9 second DEM can be loaded using \code{getDEM()}.
 #' @param catchments is either the full file name to an ESRI shape file of points or polygons (latter assumed to be catchment boundaries) or a shape file
-#' already imported using readShapeSpatial(). Either way the shape file must be in long/lat (i.e. not projected) use the ellipsoid GRS 80.
-#' @param spatial.function.name character string for the function name applied to estimate the daily spatial spread in each variable. The default is \code{var}.
+#' already imported using readShapeSpatial(). Either way the shape file must be in long/lat (i.e. not projected), use the ellipsoid GRS 80, and the first column should be a unique ID.
+#' @param temporal.timestep character string for the time step of the output data. The options are \code{daily}, \code{weekly}, \code{monthly}, \code{quarterly},
+#' \code{annual}  or a user-defined index for, say, water-years (see \code{xts::period.apply}). The default is \code{daily}.
+#' @param temporal.function.name character string for the function name applied to aggregate the daily data to \code{temporal.timestep}.
+#' Note, NA values are not removed from the aggregation calculation. If this is required then consider writing your own function. The default is \code{mean}.
+#' @param spatial.function.name character string for the function name applied to estimate the daily spatial spread in each variable. If \code{NA} or \code{""} and \code{catchments} is a polygon, then
+#' the spatial data is returned. The default is \code{var}.
+#' @param interpMethod character string defining the method for interpolating the gridded data (see \code{raster::extract}). The options are: \code{'simple'}, \code{'bilinear'} and \code{''}. The default
+#' is \code{''}. This will set the interpolation to \code{'simple'} when \code{catchments} is a polygon(s) and to \code{'bilinear'} when \code{catchments} are points.
 #' @param ET.function character string for the evapotranspiration function to be used. The methods that can be derived from the AWAP data are are \code{\link[Evapotranspiration]{ET.Abtew}},
 #' \code{\link[Evapotranspiration]{ET.HargreavesSamani}}, \code{\link[Evapotranspiration]{ET.JensenHaise}}, \code{\link[Evapotranspiration]{ET.Makkink}}, \code{\link[Evapotranspiration]{ET.McGuinnessBordne}}, \code{\link[Evapotranspiration]{ET.MortonCRAE}} ,
 #' \code{\link[Evapotranspiration]{ET.MortonCRWE}}, \code{\link[Evapotranspiration]{ET.Turc}}. Default is \code{\link[Evapotranspiration]{ET.MortonCRAE}}.
@@ -58,10 +70,14 @@
 #' @param ET.constants list of constants from Evapotranspiration package required for ET calculations. To get the data use the command \code{data(constants)}. Default is \code{list()}.
 #'
 #' @return
-#' When "catchments" are polygons, the returned variable is list variables containing two data.frames, one of the catchment average daily climate
-#' metrics and another of the catchment variance daily climate metrics.
+#' When \code{catchments} are polygons and \code{spatial.function.name} is not \code{NA} or \code{""}, then the returned variable is a list variable containing two data.frames. The first is the areal aggreggated climate
+#' metrics named \code{catchmentTemporal.} with a suffix as defined by \code{temporal.function.name}). The second is the measure of spatial variability
+#' named \code{catchmentSpatial.} with a suffix as defined by \code{spatial.function.name}).
 #'
-#' When "catchments" are points, the returned variable is a data.frame containing daily climate data at each point.
+#' When \code{catchments} are polygons and \code{spatial.function.name} does equal \code{NA} or \code{""}, then the returned variable is a \code{sp::SpatialPixelsDataFrame} where the first colum is the catchment IDs
+#' and the latter columns are the results for each variable at each time point as defined by \code{temporal.timestep}.
+#'
+#' When \code{catchments} are points, the returned variable is a data.frame containing daily climate data at each point.
 #'
 #' @seealso
 #' \code{\link{makeNetCDF_file}} for building the NetCDF files of daily climate data.
@@ -75,9 +91,15 @@
 #' startDate = as.Date("2000-01-01","%Y-%m-%d")
 #' endDate = as.Date("2000-02-28","%Y-%m-%d")
 #'
-#' # Set names for netCDF files (in the system temp. directory).
-#' ncdfFilename = tempfile(fileext='.nc')
-#' ncdfSolarFilename = tempfile(fileext='.nc')
+#' # Set names for netCDF files.
+#' ncdfFilename = 'AWAPer_demo.nc'
+#' ncdfSolarFilename = 'AWAPer_solar_demo.nc'
+#'
+#' # Remove any existing netCDF demo files.
+#' if (file.exists(ncdfFilename))
+#'    is.removed = file.remove(ncdfFilename)
+#' if (file.exists(ncdfSolarFilename))
+#'    is.removed = file.remove(ncdfSolarFilename)
 #'
 #' # Build netCDF grids and over a defined time period.
 #' \donttest{
@@ -88,17 +110,14 @@
 #' # Load example cacthment boundaries.
 #' data("catchments")
 #'
-#' # Get the constants required for ET estimation.
+#' # Get the constanrs required for ET estimation.
 #' data(constants,package='Evapotranspiration')
 #'
-#' # Set file name for DEM file to the system temp. directory.
-#' DEM.file = tempfile(fileext='.asc')
-#'
 #' # Download and import the Australian 9 second DEM.
-#' DEM_9s = getDEM(workingFolder=dirname(DEM.file),
-#'          DEMfilename=basename(DEM.file))
+#' # Note, the DEM only needs be downloaded if ET is be estimated.
+#' DEM_9s = getDEM()
 #'
-#' # Extract precip data.
+#' # Extract daily climate data (precip, Tmin, Tmax, VPD, ET).
 #' # Note, the input "catchments" can also be a file to a ESRI shape file.
 #' climateData = extractCatchmentData(ncdfFilename=file.names$ncdfFilename,
 #'               ncdfSolarFilename=file.names$ncdfSolarFilename,
@@ -106,10 +125,21 @@
 #'               catchments=catchments,DEM=DEM_9s, ET.constants=constants)
 #'
 #' # Extract the daily catchment average data.
-#' climateDataAvg = climateData$catchmentAvg
+#' climateDataAvg = climateData$catchmentTemporal.mean
 #'
 #' # Extract the daily catchment variance data.
-#' climateDataVar = climateData$catchmentvar
+#' climateDataVar = climateData$catchmentSpatial.var
+#'
+#' # Extract the monthly total precipitation.
+#' monthlyPrecipData = extractCatchmentData(ncdfFilename=file.names$ncdfFilename,
+#'               ncdfSolarFilename=file.names$ncdfSolarFilename,
+#'               extractFrom=startDate, extractTo=endDate,
+#'               catchments=catchments,
+#'               getTmin = F, getTmax = F, getVprp = F, getSolarrad = F, getET = F,
+#'               temporal.timestep = 'monthly', temporal.function.name = 'sum')
+#'
+#' # Extract the monthly precip. sum data.
+#' monthlyPrecipData.sum = monthlyPrecipData$catchmentTemporal.sum
 #' }
 #' @export
 extractCatchmentData <- function(
@@ -125,7 +155,10 @@ extractCatchmentData <- function(
   getET = TRUE,
   DEM='',
   catchments='',
+  temporal.timestep = 'daily',
+  temporal.function.name = 'mean',
   spatial.function.name = 'var',
+  interpMethod = '',
   ET.function = 'ET.MortonCRAE',
   ET.Mortons.est = 'potential ET',
   ET.Turc.humid=F,
@@ -137,8 +170,6 @@ extractCatchmentData <- function(
 
   # Open NetCDF grids
   awap <- ncdf4::nc_open(ncdfFilename)
-  if (getSolarrad)
-    awap_solar <- ncdf4::nc_open(ncdfSolarFilename)
 
   # Check if the required variable is within the netcdf file.
   netCDF.variables = names(awap$var)
@@ -162,8 +193,39 @@ extractCatchmentData <- function(
   if (length(timepoints2Extract)==0)
     stop('The dates to extract produce a zero vector of dates of zero length. Check the inputs dates are as YYYY-MM-DD')
 
+  # Check time step
+  temporal.timestep.options = c('daily','weekly','monthly','quarterly','annual', 'period')
+  if (!is.character(temporal.timestep)) {
+    if (!is.integer(temporal.timestep))
+      stop('temporal.timestep must be a character string or an integer vector.')
+
+    if (any(temporal.timestep<0 || temporal.timestep > length(timepoints2Extract)))
+      stop(paste('temporal.timestep must be a character string or an integer vector with values >0 and <= the maximum days of data extracted (ie',
+                 length(timepoints2Extract),')'))
+
+    temporal.timestep.index = temporal.timestep
+    temporal.timestep = 'period'
+
+  } else if (!any(which(temporal.timestep.options == temporal.timestep))) {
+    stop('temporal.timestep must be daily, weekly, monthly, quarterly or annual or an integer vector.')
+  }
+
+  # Check temporal analysis funcion is valid.
+  data.junk = t(as.matrix(stats::runif(100, 0.0, 1.0)*100))
+  result = tryCatch({
+    apply(data.junk, 1,FUN=temporal.function.name)
+  }, warning = function(w) {
+    message(paste("Warning temporal.function.name produced the following",w))
+  }, error = function(e) {
+    stop(paste('temporal.function.name produced an error when applied using test data:',e))
+  }, finally = {
+    rm(data.junk)
+  }
+  )
+
   # Check ET inputs
   if (getET) {
+
     if (length(ET.constants)==0)
       stop('ET.constants must be input from Evapotranspiration package using the command: data(constants)')
 
@@ -209,6 +271,14 @@ extractCatchmentData <- function(
       stop('Calculation of ET for the given function requires extractions of tmax (i.e. set getVprp=T)')
     if (ET.inputdata.filt$Precip[1] && !getPrecip)
       stop('Calculation of ET for the given function requires extractions of precip (i.e. set getPrecip=T)')
+    if (ET.inputdata.filt$Rs[1]) {
+      if (!file.exists(ncdfSolarFilename)) {
+        stop('The input ncdfSolarFilename is required for the selected ET function.')
+      }
+      if (!getSolarrad) {
+        stop('Calculation of ET for the given function requires extractions of solar radiation (i.e. set getSolarrad=T)')
+      }
+    }
   }
 
   # Checking the DEM
@@ -254,6 +324,43 @@ extractCatchmentData <- function(
   if (methods::is(catchments,"SpatialPointsDataFrame")) {
     isCatchmentsPolygon=FALSE;
   }
+
+  # Check the interpolation method.
+  if (interpMethod!='' && interpMethod!='simple' && interpMethod!='bilinear') {
+    stop('The input for "interpMethod" must either "simple" or "bilinear".')
+  }
+  if (interpMethod=='') {
+    if (isCatchmentsPolygon) {
+      interpMethod='simple';
+    } else {
+      interpMethod='bilinear';
+    }
+  }
+
+  # Check if the spatial data should be returned or analysed.
+  do.spatial.analysis=T
+  if (isCatchmentsPolygon && is.na(spatial.function.name) || (is.character(spatial.function.name) && spatial.function.name=='')) {
+    do.spatial.analysis=F
+  }
+
+  if (do.spatial.analysis) {
+    # Check spatial analysis funcion is valid.
+    data.junk = t(as.matrix(stats::runif(100, 0.0, 1.0)*100))
+    result = tryCatch({
+      apply(data.junk, 1,FUN=spatial.function.name)
+    }, warning = function(w) {
+      message(paste("Warning spatial.function.name produced the following",w))
+    }, error = function(e) {
+      stop(paste('spatial.function.name produced an error when applied using test data:',e))
+    }, finally = {
+      rm(data.junk)
+    }
+    )
+  }
+
+  # Open solar rad netCDF file
+  if (getSolarrad)
+    awap_solar <- ncdf4::nc_open(ncdfSolarFilename)
 
   # Get netCDF geometry
   timePoints <- ncdf4::ncvar_get(awap, "time")
@@ -308,6 +415,8 @@ extractCatchmentData <- function(
   # Recalculate the time points to extract.
   timepoints2Extract = seq( as.Date(extractFrom,'%Y-%m-%d'), by="day", to=as.Date(extractTo,'%Y-%m-%d'))
 
+
+
   message(paste('    Data will be extracted from ',format.Date(extractFrom,'%Y-%m-%d'),' to ', format.Date(extractTo,'%Y-%m-%d'),' at ',length(catchments),' catchments '));
   message('Starting data extraction:')
 
@@ -330,7 +439,7 @@ extractCatchmentData <- function(
         message(paste('   ... Building weights for catchment ', i,' of ',length(catchments)));
         raster::removeTmpFiles(h=0)
       }
-      w = raster::rasterize(catchments[i,], precipGrd,getCover=T)
+      w = raster::rasterize(x=catchments[i,], y=precipGrd,fun='last',getCover=T)
 
       # Extract the mask values (i.e. fraction of each grid cell within the polygon.
       w2 = raster::getValues(w);
@@ -388,13 +497,6 @@ extractCatchmentData <- function(
     extractDay_solar = c();
   }
 
-  # Set the interpolation method.
-  if (isCatchmentsPolygon) {
-    interpMethod='simple';
-  } else {
-    interpMethod='bilinear';
-  }
-
   message('... Starting to extract data across all catchments:')
   for (j in 1:length(timepoints2Extract)){
 
@@ -405,13 +507,13 @@ extractCatchmentData <- function(
       message(paste('    ... Extracting data for time point ', j,' of ',length(timepoints2Extract)));
     }
     if (getPrecip)
-      precip[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='precip',lvar=3, method=interpMethod), longLat.all)
+      precip[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='precip',lvar=3), longLat.all, method=interpMethod)
     if (getTmin)
-      tmin[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='tmin',lvar=3, method=interpMethod), longLat.all)
+      tmin[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='tmin',lvar=3), longLat.all, method=interpMethod)
     if (getTmax)
-      tmax[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='tmax',lvar=3, method=interpMethod), longLat.all)
+      tmax[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='tmax',lvar=3), longLat.all, method=interpMethod)
     if (getVprp)
-      vprp[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='vprp',lvar=3, method=interpMethod), longLat.all)
+      vprp[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='vprp',lvar=3), longLat.all, method=interpMethod)
 
     # Get date of extracted grid.
     extractDate = raster::getZ(raster::raster(ncdfFilename, band=ind,lvar=3));
@@ -427,7 +529,7 @@ extractCatchmentData <- function(
 
       if (ind>0) {
         # Get ncdf grid
-        solarrad[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfSolarFilename, band=ind, varname='solarrad',lvar=3, method=interpMethod), longLat.all)
+        solarrad[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfSolarFilename, band=ind, varname='solarrad',lvar=3), longLat.all, method=interpMethod)
 
         # Get date of extracted grid.
         extractDate = raster::getZ(raster::raster(ncdfSolarFilename, band=ind,lvar=3));
@@ -459,10 +561,9 @@ extractCatchmentData <- function(
     solarrad_avg = matrix(NA, length(monthdayUnique), length(w.all));
     for (j in 1:length(monthdayUnique)) {
       ind = monthdayAll==monthdayUnique[j];
-
       if (sum(ind)==1) {
         solarrad_avg[j,] = solarrad[ind,];
-      } else if (length(stats::na.omit(solarrad[ind,]))>0) {
+      } else {
         solarrad_avg[j,] = apply(stats::na.omit(solarrad[ind,]),2,mean)
       }
     }
@@ -470,13 +571,8 @@ extractCatchmentData <- function(
     # Assign the daily average solar radiation to each day prior to 1 Jan 1990
     for (j in 1:length(timepoints2Extract)) {
       if (timepoints2Extract[j]<as.Date('1990-1-1','%Y-%m-%d')) {
-        ind = monthdayUnique==monthdayAll[j]
-
-        # Only assign averages if available eg Feb 29 may not be available in average record if the post
-        # 1990 extraction period does not include a leap year.
-        if (sum(ind)>0) {
-          solarrad_interp[j,] = solarrad_avg[ind,]
-        }
+        ind = monthdayUnique==monthdayAll[j];
+        solarrad_interp[j,] = solarrad_avg[ind,]
       }
     }
 
@@ -505,7 +601,7 @@ extractCatchmentData <- function(
   # Loop though each catchment and calculate the catchment averager and variance.
   if (getET) {
     if (!exists('ET.constants') || !is.list(ET.constants))
-    stop('ET.constants is empty or not a list.')
+      stop('ET.constants is empty or not a list.')
   }
   message('... Calculating catchment weighted daily data.')
   for (i in 1:length(catchments)) {
@@ -514,17 +610,9 @@ extractCatchmentData <- function(
       message(paste('    ... Calculating catchment ', i,' of ',length(catchments)));
     }
 
-
-
-    # Calculate catchment stats and add data to the data.frame for all catchments
-    #----------------------------------------------------------------------------------------
-    catchmentAvgTmp = data.frame(CatchmentID=catchments[i,1],year=extractYear,month=extractMonth,day=extractDay);
-    catchmentVarTmp = data.frame(CatchmentID=catchments[i,1],year=extractYear,month=extractMonth,day=extractDay);
-
     # Get the weights for the catchment
     ind = catchment.lookup[i,1]:catchment.lookup[i,2]
     w = w.all[ind]
-
 
     # Calculate Morton's PET at each grid cell and time point. NOTE, va is divided by 10 to go from hPa to Kpa
     if (getET) {
@@ -570,8 +658,8 @@ extractCatchmentData <- function(
 
         # Convert to required format for ET package
         dataPP=Evapotranspiration::ReadInputs(ET.var.names ,dataRAW,constants=NA,stopmissing = c(99,99,99),
-                          interp_missing_days=ET.interp_missing_days, interp_missing_entries=ET.interp_missing_entries, interp_abnormal=ET.interp_abnormal,
-                          missing_method='DoY average', abnormal_method='DoY average', message = "no")
+                                              interp_missing_days=ET.interp_missing_days, interp_missing_entries=ET.interp_missing_entries, interp_abnormal=ET.interp_abnormal,
+                                              missing_method=NULL, abnormal_method='DoY average', message = "no")
 
         # Update constants for the site
         constants$Elev = DEMpoints[j]
@@ -632,79 +720,272 @@ extractCatchmentData <- function(
 
     }
 
-    # Check if there are enough grid cells to calculate the variance.
-    calcVariance =  F;
-    if (length(ind)>1)
-      calcVariance =  T;
+    # Calculate catchment stats and add data to the data.frame for all catchments
+    #----------------------------------------------------------------------------------------
+    extractDate = ISOdate(year=extractYear,month=extractMonth,day=extractDay)
 
-    # Apply weights
+
+    # Do the temporal aggregation
+    #-----------------------------
+    precip.xts = NA
+    tmin.xts = NA
+    tmax.xts = NA
+    vprp.xts = NA
+    solarrad.xts = NA
+    solarrad_interp.xts = NA
+    ET.xts = NA
     if (getPrecip) {
-      catchmentAvgTmp$precip_mm = apply(t(t(precip[,ind]) * w),1,sum,na.rm=TRUE);
-      if (calcVariance) {
-        catchmentVarTmp$precip_mm = apply(precip[,ind],1,spatial.function.name,na.rm=TRUE);
-      } else {
-        catchmentVarTmp$precip_mm = NA;
-      }
+      precip.xts = xts::as.xts(precip[,ind], order.by=extractDate)
+      precip.xts <-
+        switch(
+          which(temporal.timestep.options == temporal.timestep),
+          precip.xts, # daily timestep - do nothing
+          xts::apply.weekly(precip.xts, apply, 2, temporal.function.name),  # weekly timestep
+          xts::apply.monthly(precip.xts, apply, 2, temporal.function.name), # monthly timestep
+          xts::apply.quarterly(precip.xts, apply, 2, temporal.function.name), # quarterly timestep
+          xts::apply.yearly(precip.xts, apply, 2, temporal.function.name), # annual timestep
+          xts::period.apply(precip.xts, INDEX=temporal.timestep.index, apply, 2, temporal.function.name), # user defined period
+        )
     }
+
     if (getTmin) {
-      catchmentAvgTmp$Tmin = apply(t(t(tmin[,ind]) * w),1,sum,na.rm=TRUE);
-      if (calcVariance) {
-        catchmentVarTmp$Tmin = apply(tmin[,ind],1,spatial.function.name,na.rm=TRUE);
-      } else {
-        catchmentVarTmp$Tmin = NA;
-      }
+      tmin.xts = xts::as.xts(tmin[,ind], order.by=extractDate)
+      tmin.xts <-
+        switch(
+          which(temporal.timestep.options == temporal.timestep),
+          tmin.xts, # daily timestep - do nothing
+          xts::apply.weekly(tmin.xts, apply, 2, temporal.function.name),  # weekly timestep
+          xts::apply.monthly(tmin.xts, apply, 2, temporal.function.name), # monthly timestep
+          xts::apply.quarterly(tmin.xts, apply, 2, temporal.function.name), # quarterly timestep
+          xts::apply.yearly(tmin.xts, apply, 2, temporal.function.name), # annual timestep
+          xts::period.apply(tmin.xts, INDEX=temporal.timestep.index, apply, 2, temporal.function.name), # user defined period
+        )
     }
+
     if (getTmax) {
-      catchmentAvgTmp$Tmax = apply(t(t(tmax[,ind]) * w),1,sum,na.rm=TRUE);
-      if (calcVariance) {
-        catchmentVarTmp$Tmax = apply(tmax[,ind],1,spatial.function.name,na.rm=TRUE);
-      } else {
-        catchmentVarTmp$Tmax = NA;
-      }
+      tmax.xts = xts::as.xts(tmax[,ind], order.by=extractDate)
+      tmax.xts <-
+        switch(
+          which(temporal.timestep.options == temporal.timestep),
+          tmax.xts, # daily timestep - do nothing
+          xts::apply.weekly(tmax.xts, apply, 2, temporal.function.name),  # weekly timestep
+          xts::apply.monthly(tmax.xts, apply, 2, temporal.function.name), # monthly timestep
+          xts::apply.quarterly(tmax.xts, apply, 2, temporal.function.name), # quarterly timestep
+          xts::apply.yearly(tmax.xts, apply, 2, temporal.function.name), # annual timestep
+          xts::period.apply(tmax.xts, INDEX=temporal.timestep.index, apply, 2, temporal.function.name), # user defined period
+        )
     }
+
     if (getVprp) {
-      catchmentAvgTmp$vprp = apply(t(t(vprp[,ind]) * w),1,sum,na.rm=TRUE);
-      if (calcVariance) {
-        catchmentVarTmp$vprp = apply(vprp[,ind],1,spatial.function.name,na.rm=TRUE);
-      } else {
-        catchmentVarTmp$vprp = NA;
-      }
+      vprp.xts = xts::as.xts(vprp[,ind], order.by=extractDate)
+      vprp.xts <-
+        switch(
+          which(temporal.timestep.options == temporal.timestep),
+          vprp.xts, # daily timestep - do nothing
+          xts::apply.weekly(vprp.xts, apply, 2, temporal.function.name),  # weekly timestep
+          xts::apply.monthly(vprp.xts, apply, 2, temporal.function.name), # monthly timestep
+          xts::apply.quarterly(vprp.xts, apply, 2, temporal.function.name), # quarterly timestep
+          xts::apply.yearly(vprp.xts, apply, 2, temporal.function.name), # annual timestep
+          xts::period.apply(vprp.xts, INDEX=temporal.timestep.index, apply, 2, temporal.function.name), # user defined period
+        )
     }
+
     if (getSolarrad) {
-      catchmentAvgTmp$solarrad = apply(t(t(solarrad[,ind]) * w),1,sum,na.rm=TRUE);
-      catchmentAvgTmp$solarrad_interp = apply(t(t(solarrad_interp[,ind]) * w),1,sum,na.rm=TRUE);
-      if (calcVariance) {
-        catchmentVarTmp$solarrad = apply(solarrad[,ind],1,spatial.function.name,na.rm=TRUE);
-        catchmentVarTmp$solarrad_interp = apply(solarrad_interp[,ind],1,spatial.function.name,na.rm=TRUE);
-      } else {
-        catchmentVarTmp$solarrad = NA;
-        catchmentVarTmp$solarrad_interp = NA;
+      solarrad.xts = xts::as.xts(solarrad[,ind], order.by=extractDate)
+      solarrad.xts <-
+        switch(
+          which(temporal.timestep.options == temporal.timestep),
+          solarrad.xts, # daily timestep - do nothing
+          xts::apply.weekly(solarrad.xts, apply, 2, temporal.function.name),  # weekly timestep
+          xts::apply.monthly(solarrad.xts, apply, 2, temporal.function.name), # monthly timestep
+          xts::apply.quarterly(solarrad.xts, apply, 2, temporal.function.name), # quarterly timestep
+          xts::apply.yearly(solarrad.xts, apply, 2, temporal.function.name), # annual timestep
+          xts::period.apply(solarrad.xts, INDEX=temporal.timestep.index, apply, 2, temporal.function.name), # user defined period
+        )
+
+      solarrad_interp.xts = xts::as.xts(solarrad_interp[,ind], order.by=extractDate)
+      solarrad_interp.xts <-
+        switch(
+          which(temporal.timestep.options == temporal.timestep),
+          solarrad_interp.xts, # daily timestep - do nothing
+          xts::apply.weekly(solarrad_interp.xts, apply, 2, temporal.function.name),  # weekly timestep
+          xts::apply.monthly(solarrad_interp.xts, apply, 2, temporal.function.name), # monthly timestep
+          xts::apply.quarterly(solarrad_interp.xts, apply, 2, temporal.function.name), # quarterly timestep
+          xts::apply.yearly(solarrad_interp.xts, apply, 2, temporal.function.name), # annual timestep
+          xts::period.apply(solarrad_interp.xts, INDEX=temporal.timestep.index, apply, 2, temporal.function.name), # user defined period
+        )
+    }
+
+    if (getET) {
+      ET.xts = xts::as.xts(mortAPET, order.by=extractDate)
+      ET.xts <-
+        switch(
+          which(temporal.timestep.options == temporal.timestep),
+          ET.xts, # daily timestep - do nothing
+          xts::apply.weekly(ET.xts, apply, 2, temporal.function.name),  # weekly timestep
+          xts::apply.monthly(ET.xts, apply, 2, temporal.function.name), # monthly timestep
+          xts::apply.quarterly(ET.xts, apply, 2, temporal.function.name), # quarterly timestep
+          xts::apply.yearly(ET.xts, apply, 2, temporal.function.name), # annual timestep
+          xts::period.apply(ET.xts, INDEX=temporal.timestep.index, apply, 2, temporal.function.name), # user defined period
+        )
+    }
+    #-----------------------------
+
+    # Determine the number of time steps (for creation of the output)
+    if (xts::is.xts(precip.xts)) {
+      timesteps=zoo::index(zoo::as.zoo(precip.xts))
+    } else if (xts::is.xts(tmin.xts)) {
+      timesteps=zoo::index(zoo::as.zoo(tmin.xts))
+    } else if (xts::is.xts(tmax.xts)) {
+      timesteps=zoo::index(zoo::as.zoo(tmax.xts))
+    } else if (xts::is.xts(vprp.xts)) {
+      timesteps=zoo::index(zoo::as.zoo(vprp.xts))
+    } else if (xts::is.xts(solarrad.xts)) {
+      timesteps=zoo::index(zoo::as.zoo(solarrad.xts))
+    } else if (xts::is.xts(ET.xts)) {
+      timesteps=zoo::index(zoo::as.zoo(ET.xts))
+    }
+    nTimeSteps = length(timesteps)
+
+    # Do spatial aggregation if a spatial function is provided. If spatial aggregation
+    # is not required, then build up a data.frame (each time step and data type as one column)
+    # for latter conversion to a spatial object.
+    #-----------------------------
+    if (do.spatial.analysis) {
+      # Create data frame for final results
+      catchmentAvgTmp = data.frame(CatchmentID=catchments[i,1],year=as.integer(format(timesteps,"%Y")) ,month=as.integer(format(timesteps,"%m")),day=as.integer(format(timesteps,"%d")),row.names = NULL);
+      catchmentVarTmp = catchmentAvgTmp
+
+      # Check if there are enough grid cells to calculate the variance.
+      calcVariance =  F;
+      if (length(ind)>1)
+        calcVariance =  T;
+
+      # Do spatial aggregation using grid cell weights
+      #-----------------------------
+      if (getPrecip) {
+        catchmentAvgTmp$precip_mm = apply(t(t(precip.xts) * w),1,sum,na.rm=TRUE)
+        if (calcVariance) {
+          catchmentVarTmp$precip_mm = apply(precip.xts,1,spatial.function.name,na.rm=TRUE);
+        } else {
+          catchmentVarTmp$precip_mm = NA;
+        }
+      }
+      if (getTmin) {
+        catchmentAvgTmp$Tmin = apply(t(t(tmin.xts) * w),1,sum,na.rm=TRUE);
+        if (calcVariance) {
+          catchmentVarTmp$Tmin = apply(tmin.xts,1,spatial.function.name,na.rm=TRUE);
+        } else {
+          catchmentVarTmp$Tmin = NA;
+        }
+      }
+      if (getTmax) {
+        catchmentAvgTmp$Tmax = apply(t(t(tmax.xts) * w),1,sum,na.rm=TRUE);
+        if (calcVariance) {
+          catchmentVarTmp$Tmax = apply(tmax.xts,1,spatial.function.name,na.rm=TRUE);
+        } else {
+          catchmentVarTmp$Tmax = NA;
+        }
+      }
+      if (getVprp) {
+        catchmentAvgTmp$vprp = apply(t(t(vprp.xts) * w),1,sum,na.rm=TRUE);
+        if (calcVariance) {
+          catchmentVarTmp$vprp = apply(vprp.xts,1,spatial.function.name,na.rm=TRUE);
+        } else {
+          catchmentVarTmp$vprp = NA;
+        }
+      }
+      if (getSolarrad) {
+        catchmentAvgTmp$solarrad = apply(t(t(solarrad.xts) * w),1,sum,na.rm=TRUE);
+        catchmentAvgTmp$solarrad_interp = apply(t(t(solarrad_interp.xts) * w),1,sum,na.rm=TRUE);
+        if (calcVariance) {
+          catchmentVarTmp$solarrad = apply(solarrad.xts,1,spatial.function.name,na.rm=TRUE);
+          catchmentVarTmp$solarrad_interp = apply(solarrad_interp.xts,1,spatial.function.name,na.rm=TRUE);
+        } else {
+          catchmentVarTmp$solarrad = NA;
+          catchmentVarTmp$solarrad_interp = NA;
+        }
+
+      }
+      if (getET) {
+        catchmentAvgTmp$ET_mm = apply(t(t(ET.xts) * w),1,sum,na.rm=TRUE);
+        if (calcVariance) {
+          catchmentVarTmp$ET_mm = apply(ET.xts,1,spatial.function.name,na.rm=TRUE);
+        } else {
+          catchmentVarTmp$ET_mm = NA;
+        }
       }
 
-    }
-    if (getET) {
-      catchmentAvgTmp$ET_mm = apply(t(t(mortAPET) * w),1,sum,na.rm=TRUE);
-      if (calcVariance) {
-        catchmentVarTmp$ET_mm = apply(mortAPET,1,spatial.function.name,na.rm=TRUE);
-      } else {
-        catchmentVarTmp$ET_mm = NA;
+    } else {
+      # Do not undertake spatial aggregation. Instead collate
+      # results for each grid cell.
+
+      nGridCells = catchment.lookup[i,2] - catchment.lookup[i,1] +1
+      catchmentAvgTmp = data.frame(CatchmentID=rep(catchments@data[i,1],nGridCells))
+      catchmentVar = NA
+      if (getPrecip) {
+        newDataCol = as.data.frame(t(precip.xts))
+        colnames(newDataCol) = paste('Precip',format.Date(colnames(newDataCol),'%Y_%m_%d'),sep='_')
+        catchmentAvgTmp = cbind.data.frame(catchmentAvgTmp, newDataCol)
       }
+      if (getTmin) {
+        newDataCol = as.data.frame(t(tmin.xts))
+        colnames(newDataCol) = paste('Tmin',format.Date(colnames(newDataCol),'%Y_%m_%d'),sep='_')
+        catchmentAvgTmp = cbind.data.frame(catchmentAvgTmp, newDataCol)
+      }
+      if (getTmax) {
+        newDataCol = as.data.frame(t(tmax.xts))
+        colnames(newDataCol) = paste('Tmax',format.Date(colnames(newDataCol),'%Y_%m_%d'),sep='_')
+        catchmentAvgTmp = cbind.data.frame(catchmentAvgTmp, newDataCol)
+      }
+      if (getVprp) {
+        newDataCol = as.data.frame(t(vprp.xts))
+        colnames(newDataCol) = paste('vprp',format.Date(colnames(newDataCol),'%Y_%m_%d'),sep='_')
+        catchmentAvgTmp = cbind.data.frame(catchmentAvgTmp, newDataCol)
+      }
+      if (getSolarrad) {
+        newDataCol = as.data.frame(t(solarrad.xts))
+        colnames(newDataCol) = paste('solarrad',format.Date(colnames(newDataCol),'%Y_%m_%d'),sep='_')
+        catchmentAvgTmp = cbind.data.frame(catchmentAvgTmp, newDataCol)
+
+        newDataCol = as.data.frame(t(solarrad_interp.xts))
+        colnames(newDataCol) = paste('solarrad_interp',format.Date(colnames(newDataCol),'%Y_%m_%d'),sep='_')
+        catchmentAvgTmp = cbind.data.frame(catchmentAvgTmp, newDataCol)
+      }
+      if (getET) {
+        newDataCol = as.data.frame(t(ET.xts))
+        colnames(newDataCol) = paste('ET_mm',format.Date(colnames(newDataCol),'%Y_%m_%d'),sep='_')
+        catchmentAvgTmp = cbind(catchmentAvgTmp, newDataCol)
+      }
+
     }
 
 
     if (i==1) {
       catchmentAvg = catchmentAvgTmp;
-      catchmentVar = catchmentVarTmp;
+      if (do.spatial.analysis) {
+        catchmentVar = catchmentVarTmp;
+      }
     } else {
       catchmentAvg = rbind(catchmentAvg,catchmentAvgTmp)
-      catchmentVar = rbind(catchmentVar,catchmentVarTmp)
+      if (do.spatial.analysis) {
+        catchmentVar = rbind(catchmentVar,catchmentVarTmp)
+      }
     }
   }
   # end for-loop
 
   if (isCatchmentsPolygon) {
-    catchmentAvg = list(catchmentAvg, catchmentVar)
-    names(catchmentAvg) = c('catchmentAvg', paste('catchment',spatial.function.name,sep=''))
+    if (do.spatial.analysis) {
+      catchmentAvg = list(catchmentAvg, catchmentVar)
+      names(catchmentAvg) = c(paste('catchmentTemporal.',temporal.function.name,sep=''), paste('catchmentSpatial.',spatial.function.name,sep=''))
+    } else {
+      # Convert data to  a spatial grid (SpatialPixelsDataFrame)
+      gridCoords = data.frame(Long=longLat.all[,1], Lat=longLat.all[,2])
+      catchmentAvg = cbind.data.frame(gridCoords, catchmentAvg)
+      sp::coordinates(catchmentAvg) <- ~Long+Lat
+      sp::gridded(catchmentAvg) <- T
+    }
   }
 
   message('Data extraction FINISHED..')
