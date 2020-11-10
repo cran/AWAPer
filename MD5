@@ -1,5 +1,5 @@
-f0f4f3d5eee72699261062941af4c5d8 *ChangeLog
-63d73c7420c303364aa7bdf2389799f9 *DESCRIPTION
+25be2ce915fe1de878d15e947819a1e2 *ChangeLog
+965745a06ab1bb46ab8662505fb639e5 *DESCRIPTION
 8b54e5a89fbda3af5e077053d40bec76 *NAMESPACE
 eafaa88af71df5afc1651ad201c5a3af *R/data.R
 0632bc42c2f032a795340da8ec50c7b8 *R/download.ASCII.file.R
@@ -7,12 +7,12 @@ dd6242995b10242ffa588281da854b0b *R/extractCatchmentData.R
 1fc67bb304259939d081d0e526e6cbd9 *R/get.ASCII.file.header.R
 d1cc7ac245ad18c147fd50f629a88023 *R/getDEM.R
 4c04f1360ff953aa4485a658f01ff73c *R/getURLs.R
-d4c967eb6ae7c88f6297ede47ef726f1 *R/makeNetCDF_file.R
+7382db82b979bb75418f3d313fa181f1 *R/makeNetCDF_file.R
 f486e6fbeb9fbe32a6f5a3ebf30deeeb *R/readin.ASCII.file.R
 48a1af0d50048f35479d218aba0b8de1 *README.md
 ef3936cc85356c2126359ecf25606f8a *build/vignette.rds
 f9e9248afcfe484cda7a18a64a5eff5b *data/catchments.rda
-587f85ea9a3e07c6a328f5e6a5bed3ce *inst/CITATION
+31bb9d4a8a9dd2d9431f2492ae81cbd6 *inst/CITATION
 65671a5eceb57e8dc5f5120ba2323f96 *inst/doc/Point_rainfall.Rmd
 4025710ec9d0dfbd6f4b0345cccd1352 *inst/doc/Point_rainfall.html
 3026bb815737b045260e08657d3c0477 *man/catchments.Rd
