@@ -66,3 +66,13 @@ Nov 7 2020
 Nov 9 2020
 * System maximum file download time increased from the default of 60 sec to 300 sec (requested by Em. Prof. Brian Ripley)
 * Citation author format updated.
+
+Dec 30 2020
+* Example removed from getDEM(). This was done to reduce the build time when \donttest{} example code is ignored.
+* Example removed from extractCatchmentData(), specifically the ET exmaple. This was done to reduce the build time when \donttest{} example code is ignored.
+* Warning removed from extractCatchmentData() re variable name not set when extracting time points.
+* Pre-compiled vignette added (see Catchment_avg_ET_rainfall.Rmd.orig)
+
+11 Feb 2021
+* Bug fixed in extractCatchmentData() that caused an error when ET was estimated for a single grid point
+* Bug fixed in extractCatchmentData() that caused an error when the source data (other that solar radiation) had a data-gap and ET was estimated. This was resolved  by interpolatiing the point using 'DoY average'.

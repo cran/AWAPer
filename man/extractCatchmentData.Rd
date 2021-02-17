@@ -137,60 +137,46 @@ Lastly, data is extracted for all time points and no temporal infilling is under
 # The example shows how to extract and save data.
 # For an additional example see \url{https://github.com/peterson-tim-j/AWAPer/blob/master/README.md}
 #---------------------------------------
+library(sp)
 
 # Set dates for building netCDFs and extracting data.
+# Note, to reduce runtime this is done only a fortnight (14 days).
 startDate = as.Date("2000-01-01","\%Y-\%m-\%d")
-endDate = as.Date("2000-02-28","\%Y-\%m-\%d")
+endDate = as.Date("2000-01-14","\%Y-\%m-\%d")
 
 # Set names for netCDF files.
-ncdfFilename = 'AWAPer_demo.nc'
-ncdfSolarFilename = 'AWAPer_solar_demo.nc'
-
-# Remove any existing netCDF demo files.
-if (file.exists(ncdfFilename))
-   is.removed = file.remove(ncdfFilename)
-if (file.exists(ncdfSolarFilename))
-   is.removed = file.remove(ncdfSolarFilename)
+ncdfFilename = tempfile(fileext='.nc')
+ncdfSolarFilename = tempfile(fileext='.nc')
 
 # Build netCDF grids and over a defined time period.
+# Only precip data is to be added to the netCDF files.
+# This is because the URLs for the other variables are set to zero.
 \donttest{
 file.names = makeNetCDF_file(ncdfFilename=ncdfFilename,
              ncdfSolarFilename=ncdfSolarFilename,
-             updateFrom=startDate, updateTo=endDate)
+             updateFrom=startDate, updateTo=endDate,
+             urlTmin=NA, urlTmax=NA, urlVprp=NA, urlSolarrad=NA)
 
-# Load example cacthment boundaries.
+# Load example catchment boundaries and remove all but the first.
+# Note, this is done only to speed up the example runtime.
 data("catchments")
+catchments = catchments[1,]
 
-# Get the constanrs required for ET estimation.
-data(constants,package='Evapotranspiration')
-
-# Download and import the Australian 9 second DEM.
-# Note, the DEM only needs be downloaded if ET is be estimated.
-DEM_9s = getDEM()
-
-# Extract daily climate data (precip, Tmin, Tmax, VPD, ET).
+# Extract daily precip. data (not Tmin, Tmax, VPD, ET).
 # Note, the input "catchments" can also be a file to a ESRI shape file.
 climateData = extractCatchmentData(ncdfFilename=file.names$ncdfFilename,
               ncdfSolarFilename=file.names$ncdfSolarFilename,
               extractFrom=startDate, extractTo=endDate,
-              catchments=catchments,DEM=DEM_9s, ET.constants=constants)
+              getTmin = FALSE, getTmax = FALSE, getVprp = FALSE,
+              getSolarrad = FALSE, getET = FALSE,
+              catchments=catchments,
+              temporal.timestep = 'daily')
 
 # Extract the daily catchment average data.
 climateDataAvg = climateData$catchmentTemporal.mean
 
 # Extract the daily catchment variance data.
 climateDataVar = climateData$catchmentSpatial.var
-
-# Extract the monthly total precipitation.
-monthlyPrecipData = extractCatchmentData(ncdfFilename=file.names$ncdfFilename,
-              ncdfSolarFilename=file.names$ncdfSolarFilename,
-              extractFrom=startDate, extractTo=endDate,
-              catchments=catchments,
-              getTmin = F, getTmax = F, getVprp = F, getSolarrad = F, getET = F,
-              temporal.timestep = 'monthly', temporal.function.name = 'sum')
-
-# Extract the monthly precip. sum data.
-monthlyPrecipData.sum = monthlyPrecipData$catchmentTemporal.sum
 }
 }
 \seealso{

@@ -86,60 +86,46 @@
 #' # The example shows how to extract and save data.
 #' # For an additional example see \url{https://github.com/peterson-tim-j/AWAPer/blob/master/README.md}
 #' #---------------------------------------
+#' library(sp)
 #'
 #' # Set dates for building netCDFs and extracting data.
+#' # Note, to reduce runtime this is done only a fortnight (14 days).
 #' startDate = as.Date("2000-01-01","%Y-%m-%d")
-#' endDate = as.Date("2000-02-28","%Y-%m-%d")
+#' endDate = as.Date("2000-01-14","%Y-%m-%d")
 #'
 #' # Set names for netCDF files.
-#' ncdfFilename = 'AWAPer_demo.nc'
-#' ncdfSolarFilename = 'AWAPer_solar_demo.nc'
-#'
-#' # Remove any existing netCDF demo files.
-#' if (file.exists(ncdfFilename))
-#'    is.removed = file.remove(ncdfFilename)
-#' if (file.exists(ncdfSolarFilename))
-#'    is.removed = file.remove(ncdfSolarFilename)
+#' ncdfFilename = tempfile(fileext='.nc')
+#' ncdfSolarFilename = tempfile(fileext='.nc')
 #'
 #' # Build netCDF grids and over a defined time period.
+#' # Only precip data is to be added to the netCDF files.
+#' # This is because the URLs for the other variables are set to zero.
 #' \donttest{
 #' file.names = makeNetCDF_file(ncdfFilename=ncdfFilename,
 #'              ncdfSolarFilename=ncdfSolarFilename,
-#'              updateFrom=startDate, updateTo=endDate)
+#'              updateFrom=startDate, updateTo=endDate,
+#'              urlTmin=NA, urlTmax=NA, urlVprp=NA, urlSolarrad=NA)
 #'
-#' # Load example cacthment boundaries.
+#' # Load example catchment boundaries and remove all but the first.
+#' # Note, this is done only to speed up the example runtime.
 #' data("catchments")
+#' catchments = catchments[1,]
 #'
-#' # Get the constanrs required for ET estimation.
-#' data(constants,package='Evapotranspiration')
-#'
-#' # Download and import the Australian 9 second DEM.
-#' # Note, the DEM only needs be downloaded if ET is be estimated.
-#' DEM_9s = getDEM()
-#'
-#' # Extract daily climate data (precip, Tmin, Tmax, VPD, ET).
+#' # Extract daily precip. data (not Tmin, Tmax, VPD, ET).
 #' # Note, the input "catchments" can also be a file to a ESRI shape file.
 #' climateData = extractCatchmentData(ncdfFilename=file.names$ncdfFilename,
 #'               ncdfSolarFilename=file.names$ncdfSolarFilename,
 #'               extractFrom=startDate, extractTo=endDate,
-#'               catchments=catchments,DEM=DEM_9s, ET.constants=constants)
+#'               getTmin = FALSE, getTmax = FALSE, getVprp = FALSE,
+#'               getSolarrad = FALSE, getET = FALSE,
+#'               catchments=catchments,
+#'               temporal.timestep = 'daily')
 #'
 #' # Extract the daily catchment average data.
 #' climateDataAvg = climateData$catchmentTemporal.mean
 #'
 #' # Extract the daily catchment variance data.
 #' climateDataVar = climateData$catchmentSpatial.var
-#'
-#' # Extract the monthly total precipitation.
-#' monthlyPrecipData = extractCatchmentData(ncdfFilename=file.names$ncdfFilename,
-#'               ncdfSolarFilename=file.names$ncdfSolarFilename,
-#'               extractFrom=startDate, extractTo=endDate,
-#'               catchments=catchments,
-#'               getTmin = F, getTmax = F, getVprp = F, getSolarrad = F, getET = F,
-#'               temporal.timestep = 'monthly', temporal.function.name = 'sum')
-#'
-#' # Extract the monthly precip. sum data.
-#' monthlyPrecipData.sum = monthlyPrecipData$catchmentTemporal.sum
 #' }
 #' @export
 extractCatchmentData <- function(
@@ -427,7 +413,7 @@ extractCatchmentData <- function(
   }
 
   # Build a matrix of catchment weights, lat longs, and a loopup table for each catchment.
-  message('... Building catchment weights:');
+  message('... Building catchment weights');
   if (isCatchmentsPolygon) {
 
     w.all = c();
@@ -439,7 +425,14 @@ extractCatchmentData <- function(
         message(paste('   ... Building weights for catchment ', i,' of ',length(catchments)));
         raster::removeTmpFiles(h=0)
       }
-      w = raster::rasterize(x=catchments[i,], y=precipGrd,fun='last',getCover=T)
+
+      # Extract the weights for grid cells within the catchments polygon.
+      # Note, the AWAP raster grid is cropped to the extent of the catchment polygon.
+      # This was undertaken to improve the run time performance but more importantly to overcome an error
+      # thrown by raster::rasterize when the raster is large (see https://github.com/rspatial/raster/issues/192).
+      # This solution should work when the catchments polygon is not very large (e.g. not a reasonable fraction of the
+      # Australian land mass)
+      w = raster::rasterize(x=catchments[i,], y=raster::crop(precipGrd, catchments[i,], snap='out'), fun='last',getCover=T)
 
       # Extract the mask values (i.e. fraction of each grid cell within the polygon.
       w2 = raster::getValues(w);
@@ -515,8 +508,17 @@ extractCatchmentData <- function(
     if (getVprp)
       vprp[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfFilename, band=ind, varname='vprp',lvar=3), longLat.all, method=interpMethod)
 
+    if (getPrecip) {
+      extractDate = raster::getZ(raster::raster(ncdfFilename, band=ind,lvar=3,varname='precip'))
+    } else if (getTmin) {
+      extractDate = raster::getZ(raster::raster(ncdfFilename, band=ind,lvar=3,varname='tmin'))
+    } else if (getTmax) {
+      extractDate = raster::getZ(raster::raster(ncdfFilename, band=ind,lvar=3,varname='tmax'))
+    } else if (getVprp) {
+      extractDate = raster::getZ(raster::raster(ncdfFilename, band=ind,lvar=3,varname='vprp'))
+    }
+
     # Get date of extracted grid.
-    extractDate = raster::getZ(raster::raster(ncdfFilename, band=ind,lvar=3));
     extractYear[j] = as.integer(format(as.Date(extractDate,'%Y-%m-%d'),'%Y'));
     extractMonth[j] = as.integer(format(as.Date(extractDate,'%Y-%m-%d'),'%m'));
     extractDay[j] = as.integer(format(as.Date(extractDate,'%Y-%m-%d'),'%d'));
@@ -532,7 +534,7 @@ extractCatchmentData <- function(
         solarrad[j,1:length(w.all)]  <- raster::extract(raster::raster(ncdfSolarFilename, band=ind, varname='solarrad',lvar=3), longLat.all, method=interpMethod)
 
         # Get date of extracted grid.
-        extractDate = raster::getZ(raster::raster(ncdfSolarFilename, band=ind,lvar=3));
+        extractDate = raster::getZ(raster::raster(ncdfSolarFilename, band=ind,lvar=3, varname='solarrad'));
         extractYear_solar[j] = as.integer(format(as.Date(extractDate,'%Y-%m-%d'),'%Y'));
         extractMonth_solar[j] = as.integer(format(as.Date(extractDate,'%Y-%m-%d'),'%m'));
         extractDay_solar[j] = as.integer(format(as.Date(extractDate,'%Y-%m-%d'),'%d'));
@@ -564,15 +566,23 @@ extractCatchmentData <- function(
       if (sum(ind)==1) {
         solarrad_avg[j,] = solarrad[ind,];
       } else {
-        solarrad_avg[j,] = apply(stats::na.omit(solarrad[ind,]),2,mean)
+        if (ncol(solarrad)==1) {
+          solarrad_avg[j,] = mean(solarrad[ind,],na.rm=T)
+        } else {
+          solarrad_avg[j,] = apply(stats::na.omit(solarrad[ind,]),2,mean)
+        }
+
       }
     }
 
     # Assign the daily average solar radiation to each day prior to 1 Jan 1990
     for (j in 1:length(timepoints2Extract)) {
       if (timepoints2Extract[j]<as.Date('1990-1-1','%Y-%m-%d')) {
-        ind = monthdayUnique==monthdayAll[j];
-        solarrad_interp[j,] = solarrad_avg[ind,]
+        ind = which(monthdayUnique==monthdayAll[j])
+        if (length(ind)==1) {
+          solarrad_interp[j,] = solarrad_avg[ind,]
+        }
+
       }
     }
 
@@ -656,10 +666,11 @@ extractCatchmentData <- function(
         # if (!ET.inputdata.filt$Precip)
         #   dataRAW$Precip = NULL
 
-        # Convert to required format for ET package
+        # Convert to required format for ET package.
+        # Note, missing_method changed from NULL to "DoY average" because individual grid cells can be NA. eg
         dataPP=Evapotranspiration::ReadInputs(ET.var.names ,dataRAW,constants=NA,stopmissing = c(99,99,99),
                                               interp_missing_days=ET.interp_missing_days, interp_missing_entries=ET.interp_missing_entries, interp_abnormal=ET.interp_abnormal,
-                                              missing_method=NULL, abnormal_method='DoY average', message = "no")
+                                              missing_method="DoY average", abnormal_method='DoY average', message = "no")
 
         # Update constants for the site
         constants$Elev = DEMpoints[j]
